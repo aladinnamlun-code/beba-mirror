@@ -1,55 +1,50 @@
 import os
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
-from bson import ObjectId
 
 app = Flask(__name__)
 
-# Env Vars
-MONGO_URI = os.getenv("MONGO_URI") # The connection string from MongoDB Atlas
-DB_NAME = "cloud_guardian"
-COLLECTION_NAME = "memory_mirror"
+# Lấy MongoDB URI từ Environment Variable
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = "openclaw_mirror"
+COLLECTION_NAME = "state"
 
-client = MongoClient(MONGO_URI)
-db = client[DB_NAME]
-collection = db[COLLECTION_NAME]
+def get_db():
+    if not MONGO_URI:
+        return None
+    client = MongoClient(MONGO_URI)
+    return client[DB_NAME]
 
 @app.route('/save', methods=['POST'])
-def save_memory():
-    """
-    Saves a JSON blob to the mirror.
-    Payload: {"id": "server_id", "data": {...}}
-    """
-    payload = request.json
-    item_id = payload.get("id")
-    data = payload.get("data")
+def save_data():
+    """Lưu dữ liệu trạng thái vào MongoDB"""
+    db = get_db()
+    if db is None: return jsonify({"error": "MONGO_URI missing"}), 500
     
-    if not item_id or data is None:
-        return jsonify({"status": "error", "message": "Missing id or data"}), 400
+    data = request.get_json()
+    item_id = data.get("id")
+    content = data.get("data")
     
-    collection.update_one(
+    if not item_id or content is None:
+        return jsonify({"error": "Missing id or data"}), 400
+    
+    db[COLLECTION_NAME].update_one(
         {"_id": item_id},
-        {"$set": {"data": data}},
+        {"$set": {"data": content}},
         upsert=True
     )
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "ok"})
 
 @app.route('/load/<item_id>', methods=['GET'])
-def load_memory(item_id):
-    """
-    Loads a JSON blob from the mirror.
-    """
-    doc = collection.find_one({"_id": item_id})
+def load_data(item_id):
+    """Tải dữ liệu trạng thái từ MongoDB"""
+    db = get_db()
+    if db is None: return jsonify({"error": "MONGO_URI missing"}), 500
+    
+    doc = db[COLLECTION_NAME].find_one({"_id": item_id})
     if doc:
-        return jsonify({"status": "ok", "data": doc["data"]}), 200
+        return jsonify({"status": "ok", "data": doc.get("data")})
     return jsonify({"status": "error", "message": "Not found"}), 404
 
-# For Vercel deployment
-def handler(request):
-    # This is the wrapper for Vercel Serverless Functions
-    # (Optional: depending on how Flask is integrated with Vercel)
-    return app(request)
-
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 80)))
-# test
+    app.run()
